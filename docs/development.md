@@ -60,6 +60,7 @@ python -m unittest discover -s tests -v
 python -m scripts.build_release --tag v1.1.0
 python -m scripts.validate_package --schemas /usr/share/kicad/schemas
 python -m scripts.smoke_gui --output .dev/gui.png
+python -m scripts.smoke_bom --output .dev/bom-stock.png
 python -m scripts.smoke_stackup_save --output .dev/save-preset
 ```
 
@@ -69,11 +70,16 @@ integration verifies metadata and generated documentation. Test fixtures and
 screenshots use synthetic projects and standards. Platform installation and
 save/apply/reopen checks in KiCad remain useful before releases.
 
-Generate the README screenshots from the actual four-page interface:
+Generate the existing workflow screenshots from the native interface:
 
 ```sh
 python -m scripts.capture_screenshots --output docs/screenshots
 ```
+
+The BOM smoke uses a synthetic CSV and mocked supplier data; it requires native
+wxPython but no network, KiCad CLI, or supplier account. Live provider checks can
+be run separately against a few known components. The BOM runtime uses only the
+standard library and KiCad's CLI; it adds no plugin environment dependencies.
 
 `project_manager/` contains runtime code; `tests/` contains regression fixtures
 and checks. `scripts/` provides installation, manifest creation, GUI/integration

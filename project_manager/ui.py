@@ -11,6 +11,7 @@ import wx
 
 from . import NAME, __version__
 from .context import ContextError, ProjectContext
+from .bom_ui import BomStockPanel
 from .preferences import data_directory, kicad_user_template_directory, save_template, load_standards
 from .setup import read_setup, suggested_metadata
 from .setup_ui import ProjectSetupPanel
@@ -164,6 +165,9 @@ class ProjectManagerFrame(wx.Frame):
         self.standards_panels = (self.rules_panel, self.stackup_panel)
         self.notebook.AddPage(self.rules_panel, 'Design Rules')
         self.notebook.AddPage(self.stackup_panel, 'Stackup')
+        self.bom_panel = BomStockPanel(self.notebook, storage)
+        self.notebook.AddPage(self.bom_panel, 'BOM && Stock')
+        self.notebook.Bind(wx.EVT_NOTEBOOK_PAGE_CHANGED, self._on_page_changed)
         layout.Add(self.notebook, 1, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.TOP, 16)
         footer = wx.BoxSizer(wx.HORIZONTAL)
         footer.Add(wx.StaticText(panel, label=f"Version {__version__} · KiCad 9 / 10"), 1, wx.ALIGN_CENTER_VERTICAL)
@@ -184,6 +188,11 @@ class ProjectManagerFrame(wx.Frame):
     def _append_log(self, message: str) -> None:
         self.log.AppendText(f"{datetime.now():%H:%M:%S}  {message}\n")
         self.backups_button.Enable(self.backup_path.is_dir())
+
+    def _on_page_changed(self, event):
+        if self.notebook.GetCurrentPage() is self.bom_panel:
+            self.bom_panel.on_shown()
+        event.Skip()
 
     def _on_notebook_size(self, event):
         # Keep the native tabs and use the unused right end of their strip.
@@ -336,6 +345,7 @@ class ProjectManagerFrame(wx.Frame):
         self.template_error_details = None
         for panel in self.standards_panels:
             panel.set_context(context if not error else None)
+        self.bom_panel.set_context(context if not error else None)
         if error or context is None:
             for field in self.fields.values():
                 field.ChangeValue("—")
@@ -487,4 +497,5 @@ class ProjectManagerFrame(wx.Frame):
             event.Veto()
             return
         self._closing = True
+        self.bom_panel.close()
         self.Destroy()

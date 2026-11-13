@@ -13,6 +13,53 @@ Change…**. Source paths are remembered on this computer. **Refresh** reloads
 project files and the catalog. An installed template is the comparison source;
 its version does not establish that it is the latest remote release.
 
+## BOM and stock
+
+Open **BOM & Stock** to price the saved schematic. Save schematic edits first;
+unsaved editor changes are not included. **Reload BOM** reruns KiCad's BOM export,
+excluding DNP and excluded components. Supplier fields such as `LCSC`,
+`LCSC Part #`, and `JLCPCB Part Number` are recognized. Conflicting part-number
+fields are reported instead of choosing one. **Import CSV…** also accepts grouped
+JLCPCB/KiCad BOMs with references, quantity, value and a part-number column.
+**Use saved schematic** returns from an imported CSV to the project's schematic.
+
+Change **Boards** to recalculate immediately from cached quantity price tiers.
+Identical JLCPCB numbers are aggregated before choosing a tier. All prices are
+USD, with the original supplier precision retained. **Needed / buy** shows an
+additional purchase quantity when JLCPCB supplies a minimum purchase quantity;
+the totals include those purchased components. No fabrication, assembly, shipping,
+tax, or assembly attrition fees are included. Missing prices produce an explicitly
+incomplete subtotal rather than a zero price.
+
+The tab uses anonymous JLCPCB component-page data, without an account, API key,
+AI, local server or LCSC fallback. It refreshes stale components when opened,
+with **Refresh JLCPCB**, and every 15 minutes while the tab is visible and
+**Auto refresh** is enabled. Quantity changes never make network requests. Each
+row shows when its stock/price was checked; shortages and changes since the
+previous check are highlighted. Stock is shared supplier availability, not a
+reservation. On errors, the last known values remain visible with the error;
+the website endpoint can change independently of the plugin.
+
+Select a row and choose **Set paid price…** (or double-click). Enter the total
+paid and pieces purchased: USD 13 for 10 pieces gives USD 1.30 per component.
+External and hand-soldered components can use manual prices without a JLCPCB
+number. Assigned parts continue to receive JLCPCB stock checks even when their
+price is manual. **Use JLCPCB price** removes the selected override.
+
+Manual prices, board quantity and BOM source live in the project's
+`kpm-bom.json`; keep that file with the project to carry prices between machines.
+Overrides use a supplier part number or a value/footprint/manufacturer identity,
+so ordinary reference reannotation preserves them. Changing the part identity
+requires setting a new price. A paid-price entry is a planning price, not a count
+of remaining owned inventory. Settings that cannot be read are reported and never
+silently reset. Disposable supplier data lives separately in `bom-cache/` under
+the plugin's per-user data directory. Deleting that cache preserves manual prices.
+
+The data-access approach was informed by
+[Bouni's JLCPCB Tools](https://github.com/Bouni/kicad-jlcpcb-tools).
+The client reads the JLCPCB component-detail endpoint; its `priceList`,
+`jlcPrices` and `prices` catalog fields are supported without querying LCSC.
+
 ## Template review
 
 A versioned template contains `kibot_resources/project_manager/template.json`.

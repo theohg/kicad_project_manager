@@ -1,7 +1,7 @@
 # KiCad Project Manager
 
 A native **KiCad 9 / 10** plugin for KiBot project setup, template updates, design
-rules and PCB stackups. Use your own compatible templates and standards folders.
+rules, PCB stackups, and JLCPCB BOM pricing and stock. Use your own compatible templates and standards folders.
 
 ## Install
 
@@ -30,6 +30,7 @@ the PCM package. For manual clone/symlink setup, see [development installation](
 | **Project Setup** | Edit metadata, authors, reviewer and workflow status; preview or apply. Requires compatible KiBot configuration. |
 | **Design Rules** | Select a rule profile, compare constraints and custom rules, then apply. |
 | **Stackup** | Compare saved and proposed constructions, adjust appearance, apply a preset or save an unmatched saved construction as a new preset. |
+| **BOM & Stock** | Price a saved schematic or CSV at the selected board quantity, monitor JLCPCB stock, and save paid-price overrides. |
 
 In **Review upgrade…**, **Project documents** groups editable notes, README
 sources, licences and project ignore rules. **Template
