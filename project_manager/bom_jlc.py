@@ -64,7 +64,12 @@ def parse_supply(code: str, response: dict, fetched_at: float | None = None) -> 
             raise BomError('JLCPCB returned an unsupported stock count.') from exc
     minimum = data.get('minPurchaseNum')
     minimum = positive_integer(minimum) if minimum is not None and amount(minimum) > 0 else 1
-    return Supply(code, stock, tuple(tiers), time.time() if fetched_at is None else fetched_at, minimum)
+    library_type = {'base': 'Basic', 'basic': 'Basic', 'expand': 'Extended', 'extended': 'Extended'}.get(
+        str(data.get('componentLibraryType') or '').strip().lower(), 'Unknown')
+    if library_type != 'Basic' and str(data.get('preferredComponentFlag')).lower() in ('true', '1'):
+        library_type = 'Preferred'
+    return Supply(code, stock, tuple(tiers), time.time() if fetched_at is None else fetched_at,
+                  minimum, library_type)
 
 
 def fetch_supply(code: str) -> Supply:

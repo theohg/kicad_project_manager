@@ -71,6 +71,7 @@ class Supply:
     tiers: tuple[PriceTier, ...]
     fetched_at: float
     minimum_order: int = 1
+    library_type: str = 'Unknown'
 
     def unit_price(self, quantity: int) -> Decimal | None:
         return next((tier.price for tier in sorted(self.tiers, key=lambda t: t.minimum, reverse=True)
@@ -86,6 +87,19 @@ class CostLine:
     unit_price: Decimal | None
     total: Decimal | None
     source: str
+
+
+def natural_key(value: str) -> tuple:
+    """Keep component/reference identifiers in human order, e.g. R2 before R10."""
+    return tuple((1, int(token)) if token.isdigit() else (0, token.casefold())
+                 for token in re.split(r'(\d+)', value))
+
+
+def sorted_indices(values: list[tuple], column: int, descending: bool = False) -> list[int]:
+    """Sort raw typed cells; unavailable values stay last in either direction."""
+    known = [index for index, row in enumerate(values) if row[column] is not None]
+    missing = [index for index, row in enumerate(values) if row[column] is None]
+    return sorted(known, key=lambda index: values[index][column], reverse=descending) + missing
 
 
 def calculate(parts: list[BomPart], boards: int, supplies: dict[str, Supply],

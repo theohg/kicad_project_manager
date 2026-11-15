@@ -31,6 +31,19 @@ the totals include those purchased components. No fabrication, assembly, shippin
 tax, or assembly attrition fees are included. Missing prices produce an explicitly
 incomplete subtotal rather than a zero price.
 
+Click any column header to sort ascending; click it again to sort descending.
+The arrow marks the active direction. Prices, totals, quantities and stock sort
+numerically, and unavailable values stay at the bottom in either direction.
+Sorting is retained during quantity changes and background refreshes, and edits
+continue to apply to the selected component even when its row moves. Sort
+**USD total** descending to find the largest contributors to the BOM cost.
+
+The **Type** column shows JLCPCB's **Basic** or **Extended** classification, and
+**Preferred** when explicitly supplied. Missing classifications are **Unknown**;
+the plugin does not infer them from price or stock. Older cached entries refresh
+in the background to retrieve this field. Manual prices do not change a part's
+JLCPCB classification.
+
 The tab uses anonymous JLCPCB component-page data, without an account, API key,
 AI, local server or LCSC fallback. It refreshes stale components when opened,
 with **Refresh JLCPCB**, and every 15 minutes while the tab is visible and
@@ -44,7 +57,11 @@ Select a row and choose **Set paid price…** (or double-click). Enter the total
 paid and pieces purchased: USD 13 for 10 pieces gives USD 1.30 per component.
 External and hand-soldered components can use manual prices without a JLCPCB
 number. Assigned parts continue to receive JLCPCB stock checks even when their
-price is manual. **Use JLCPCB price** removes the selected override.
+price is manual. **Use JLCPCB price** removes the selected override. That action
+is also available inside the price dialog and does not require a valid manual
+amount or quantity. Clearing **Total paid** on an existing override and choosing
+**Save** also restores supplier pricing. Parts without a supplier number return
+to an unpriced state when their manual override is cleared.
 
 Manual prices, board quantity and BOM source live in the project's
 `kpm-bom.json`; keep that file with the project to carry prices between machines.

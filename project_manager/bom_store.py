@@ -75,7 +75,10 @@ class SupplyCache:
                 return None
             if any(t.maximum is not None and t.maximum < t.minimum for t in tiers):
                 return None
-            return Supply(code, stock, tiers, fetched, positive_integer(value.get('minimum_order', 1)))
+            library_type = value.get('library_type', 'Unknown')
+            if library_type not in ('Basic', 'Extended', 'Preferred', 'Unknown'):
+                library_type = 'Unknown'
+            return Supply(code, stock, tiers, fetched, positive_integer(value.get('minimum_order', 1)), library_type)
         except (OSError, ValueError, KeyError, TypeError):
             # Supplier data is disposable; user prices never go through this path.
             return None
@@ -84,5 +87,6 @@ class SupplyCache:
         atomic_json(self.root / (part_number(supply.code) + '.json'), {
             'version': 1, 'code': supply.code, 'stock': supply.stock,
             'fetched_at': supply.fetched_at, 'minimum_order': supply.minimum_order,
+            'library_type': supply.library_type,
             'tiers': [{'minimum': t.minimum, 'maximum': t.maximum, 'price': str(t.price)} for t in supply.tiers],
         })

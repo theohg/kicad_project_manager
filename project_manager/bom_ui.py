@@ -10,10 +10,21 @@ import time
 
 import wx
 
-from .bom import BomError, amount, calculate, load_bom, positive_integer
+from .bom import BomError, amount, calculate, load_bom, natural_key, positive_integer, sorted_indices
 from .bom_jlc import fetch_supply
 from .bom_store import CACHE_TTL, STATE_FILE, SupplyCache, load_state, save_state
 from .preferences import data_directory
+
+
+COLUMNS = (
+    ('part', 'JLCPCB part', 105), ('library_type', 'Type', 90),
+    ('references', 'References', 135), ('value', 'Value', 160),
+    ('quantity', '/ board', 65), ('required', 'Needed / buy', 100),
+    ('stock', 'JLC stock', 100), ('unit_price', 'USD / pc', 90),
+    ('total', 'USD total', 95), ('source', 'Price source', 140),
+    ('checked', 'Checked', 130), ('status', 'Status', 260),
+)
+COLUMN_INDEX = {key: index for index, (key, _, _) in enumerate(COLUMNS)}
 
 
 def money(value: Decimal | None, digits: int = 4) -> str:
@@ -22,7 +33,8 @@ def money(value: Decimal | None, digits: int = 4) -> str:
 
 class PriceDialog(wx.Dialog):
     def __init__(self, parent, part, current):
-        super().__init__(parent, title='Manual component price')
+        super().__init__(parent, title='Component price')
+        self.current = current
         layout = wx.BoxSizer(wx.VERTICAL)
         label = part.code or part.value or ', '.join(part.references)
         layout.Add(wx.StaticText(self, label=label), 0, wx.ALL, 14)
@@ -43,7 +55,15 @@ class PriceDialog(wx.Dialog):
         layout.Add(self.preview, 0, wx.ALL, 14)
         note = wx.StaticText(self, label='This saves a unit price, not an inventory balance.\nJLCPCB stock checks continue for assigned parts.')
         layout.Add(note, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 14)
-        layout.Add(self.CreateButtonSizer(wx.OK | wx.CANCEL), 0, wx.EXPAND | wx.ALL, 14)
+        actions = wx.BoxSizer(wx.HORIZONTAL)
+        self.restore_button = wx.Button(self, label='Use JLCPCB price' if part.code else 'Clear paid price')
+        self.restore_button.Enable(bool(part.code or current))
+        self.restore_button.Bind(wx.EVT_BUTTON, lambda event: self.EndModal(wx.ID_REVERT_TO_SAVED))
+        actions.Add(self.restore_button, 0, wx.RIGHT, 12)
+        actions.AddStretchSpacer()
+        actions.Add(self.CreateButtonSizer(wx.OK | wx.CANCEL), 0)
+        layout.Add(actions, 0, wx.EXPAND | wx.ALL, 14)
+        self.FindWindow(wx.ID_OK).SetLabel('Save')
         self.SetSizerAndFit(layout)
         self.Bind(wx.EVT_BUTTON, self._accept, id=wx.ID_OK)
         self._preview()
@@ -56,6 +76,9 @@ class PriceDialog(wx.Dialog):
                 'saved_at': datetime.now(timezone.utc).isoformat()}
 
     def _preview(self, event=None):
+        if self.current and not self.fields['paid'].GetValue().strip():
+            self.preview.SetLabel('Save to clear this paid-price override.')
+            return
         try:
             record = self.record()
             value = amount(record['paid']) / record['quantity']
@@ -64,6 +87,9 @@ class PriceDialog(wx.Dialog):
             self.preview.SetLabel('Example: USD 13 for 10 pieces = USD 1.30 each')
 
     def _accept(self, event):
+        if self.current and not self.fields['paid'].GetValue().strip():
+            self.EndModal(wx.ID_REVERT_TO_SAVED)
+            return
         try:
             self.record()
         except BomError as exc:
@@ -93,6 +119,8 @@ class BomStockPanel(wx.Panel):
         self._last_refresh_started = 0.0
         self._cancel = threading.Event()
         self._visible_keys = []
+        self._sort_column = None
+        self._sort_descending = False
         layout = wx.BoxSizer(wx.VERTICAL)
         controls = wx.BoxSizer(wx.HORIZONTAL)
         controls.Add(wx.StaticText(self, label='Boards'), 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 8)
@@ -128,11 +156,10 @@ class BomStockPanel(wx.Panel):
         self.status = wx.StaticText(self, label='JLCPCB component prices in USD.', style=wx.ST_ELLIPSIZE_END)
         layout.Add(self.status, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 14)
         self.table = wx.ListCtrl(self, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
-        for label, width in (('JLCPCB part', 105), ('References', 135), ('Value', 160),
-                             ('/ board', 65), ('Needed / buy', 100), ('JLC stock', 100),
-                             ('USD / pc', 90), ('USD total', 95), ('Price source', 140),
-                             ('Checked', 130), ('Status', 260)):
+        for _, label, width in COLUMNS:
             self.table.InsertColumn(self.table.GetColumnCount(), label, width=width)
+        self.table.SetToolTip('Click any column header to sort; click it again to reverse the order.')
+        self.table.Bind(wx.EVT_LIST_COL_CLICK, self._sort_by_column)
         self.table.Bind(wx.EVT_LIST_ITEM_SELECTED, self._selection_changed)
         self.table.Bind(wx.EVT_LIST_ITEM_DESELECTED, self._selection_changed)
         self.table.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self._edit_price)
@@ -284,7 +311,8 @@ class BomStockPanel(wx.Panel):
             return
         now = time.time()
         codes = list(dict.fromkeys(p.code for p in self.parts if p.code and
-                    (force or p.code not in self.supplies or now - self.supplies[p.code].fetched_at >= CACHE_TTL)))
+                    (force or p.code not in self.supplies or self.supplies[p.code].library_type == 'Unknown'
+                     or now - self.supplies[p.code].fetched_at >= CACHE_TTL)))
         if not codes:
             self._render()
             return
@@ -393,7 +421,16 @@ class BomStockPanel(wx.Panel):
 
     def _selected(self):
         index = self.table.GetFirstSelected()
-        return self.parts[index] if 0 <= index < len(self.parts) else None
+        key = self._visible_keys[index] if 0 <= index < len(self._visible_keys) else None
+        return next((part for part in self.parts if part.key == key), None)
+
+    def _sort_by_column(self, event):
+        column = event.GetColumn()
+        if not 0 <= column < len(COLUMNS):
+            return
+        self._sort_descending = not self._sort_descending if column == self._sort_column else False
+        self._sort_column = column
+        self._render()
 
     def _update_buttons(self):
         selected = self._selected()
@@ -422,41 +459,63 @@ class BomStockPanel(wx.Panel):
         stale = sum(time.time() - supply.fetched_at >= CACHE_TTL for supply in self.supplies.values())
         message = f'{len(lines)} purchasing parts · {shortage} shortages · {stale} stale · {len(self.errors)} lookup errors{suffix}'
         self._message(self.state_error or self.save_error or message)
+        rows = []
+        for line in lines:
+            part = line.part
+            supply = self.supplies.get(part.code)
+            notes = [part.warning] if part.warning else []
+            if line.total is None:
+                notes.append('Price unavailable')
+            if part.code:
+                if line.stock is None:
+                    notes.append('Stock unknown')
+                elif line.stock < line.purchase:
+                    notes.append(f'Short by {line.purchase - line.stock:,}')
+            else:
+                notes.append('Stock not tracked')
+            if supply and time.time() - supply.fetched_at >= CACHE_TTL:
+                notes.append('Stale')
+            if part.code in self.errors:
+                notes.append(self.errors[part.code])
+            if part.code in self.stock_changes:
+                notes.append(f'Stock change {self.stock_changes[part.code]:+,}')
+            need = f'{line.required:,}' + (f' / {line.purchase:,}' if line.purchase != line.required else '')
+            library_type = supply.library_type if supply else 'Unknown'
+            status = ' · '.join(notes) or 'Available'
+            references = ', '.join(part.references)
+            values = (part.code or '—', library_type if part.code else '—', references, part.value,
+                      str(part.quantity), need, '—' if line.stock is None else f'{line.stock:,}',
+                      money(line.unit_price, 6), money(line.total), line.source,
+                      datetime.fromtimestamp(supply.fetched_at).strftime('%d %b %H:%M') if supply else '—', status)
+            sort_values = (natural_key(part.code) if part.code else None,
+                           natural_key(library_type) if library_type != 'Unknown' else None,
+                           natural_key(references), natural_key(part.value) if part.value else None,
+                           part.quantity, (line.required, line.purchase), line.stock,
+                           line.unit_price, line.total, natural_key(line.source),
+                           supply.fetched_at if supply else None, natural_key(status))
+            rows.append((line, values, sort_values))
+        order = (range(len(rows)) if self._sort_column is None else
+                 sorted_indices([row[2] for row in rows], self._sort_column, self._sort_descending))
         self.table.Freeze()
         try:
+            self._visible_keys = []
             self.table.DeleteAllItems()
-            for line in lines:
+            for position in order:
+                line, values, _ = rows[position]
                 part = line.part
-                supply = self.supplies.get(part.code)
-                notes = [part.warning] if part.warning else []
-                if line.total is None:
-                    notes.append('Price unavailable')
-                if part.code:
-                    if line.stock is None:
-                        notes.append('Stock unknown')
-                    elif line.stock < line.purchase:
-                        notes.append(f'Short by {line.purchase - line.stock:,}')
-                else:
-                    notes.append('Stock not tracked')
-                if supply and time.time() - supply.fetched_at >= CACHE_TTL:
-                    notes.append('Stale')
-                if part.code in self.errors:
-                    notes.append(self.errors[part.code])
-                if part.code in self.stock_changes:
-                    notes.append(f'Stock change {self.stock_changes[part.code]:+,}')
-                need = f'{line.required:,}' + (f' / {line.purchase:,}' if line.purchase != line.required else '')
-                values = (part.code or '—', ', '.join(part.references), part.value, str(part.quantity), need,
-                          '—' if line.stock is None else f'{line.stock:,}', money(line.unit_price, 6),
-                          money(line.total), line.source,
-                          datetime.fromtimestamp(supply.fetched_at).strftime('%d %b %H:%M') if supply else '—',
-                          ' · '.join(notes) or 'Available')
                 index = self.table.InsertItem(self.table.GetItemCount(), values[0])
+                self._visible_keys.append(part.key)
                 for column, value in enumerate(values[1:], 1):
                     self.table.SetItem(index, column, value)
                 if line.stock is not None and line.stock < line.purchase:
                     self.table.SetItemTextColour(index, wx.Colour(185, 55, 45))
                 if part.key == key:
                     self.table.Select(index)
+            for column, (_, label, _) in enumerate(COLUMNS):
+                header = self.table.GetColumn(column)
+                arrow = (' ▼' if self._sort_descending else ' ▲') if column == self._sort_column else ''
+                header.SetText(label + arrow)
+                self.table.SetColumn(column, header)
         finally:
             self.table.Thaw()
         self._update_buttons()
@@ -478,18 +537,24 @@ class BomStockPanel(wx.Panel):
         if not part or self.state_error:
             return
         with PriceDialog(self, part, self.state.get('overrides', {}).get(part.key, {})) as dialog:
-            if dialog.ShowModal() == wx.ID_OK:
+            result = dialog.ShowModal()
+            if result == wx.ID_OK:
                 overrides = dict(self.state.get('overrides', {}))
                 overrides[part.key] = dialog.record()
                 if self._save(dict(self.state, overrides=overrides)):
                     self._render()
+            elif result == wx.ID_REVERT_TO_SAVED:
+                self._clear_override(part.key)
 
     def _restore_price(self, event=None):
         part = self._selected()
         if not part or self.state_error:
             return
+        self._clear_override(part.key)
+
+    def _clear_override(self, key):
         overrides = dict(self.state.get('overrides', {}))
-        overrides.pop(part.key, None)
+        overrides.pop(key, None)
         if self._save(dict(self.state, overrides=overrides)):
             self._render()
 
